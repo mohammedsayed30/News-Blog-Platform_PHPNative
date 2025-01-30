@@ -1,0 +1,1 @@
+<h4>the categories record has deleted successfully from categories Database!</h4>
