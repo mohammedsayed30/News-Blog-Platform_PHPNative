@@ -1,4 +1,4 @@
-name: PHP Composer
+name: PHP CI
 
 on:
   push:
@@ -6,34 +6,59 @@ on:
   pull_request:
     branches: [ "main" ]
 
-permissions:
-  contents: read
-
 jobs:
-  build:
-
+  php-tests:
     runs-on: ubuntu-latest
 
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: root
+          MYSQL_PASSWORD: ""
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-    - name: Validate composer.json and composer.lock
-      run: composer validate --strict
-
-    - name: Cache Composer packages
-      id: composer-cache
-      uses: actions/cache@v3
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
       with:
-        path: vendor
-        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-php-
+        php-version: '8.0'
+        extensions: mysqli
 
-    - name: Install dependencies
-      run: composer install --prefer-dist --no-progress
+    - name: Install Apache
+      run: sudo apt-get install -y apache2 libapache2-mod-php
 
-    # Add a test script to composer.json, for instance: "test": "vendor/bin/phpunit"
-    # Docs: https://getcomposer.org/doc/articles/scripts.md
+    - name: Configure Apache
+      run: |
+        sudo cp -r . /var/www/html/
+        sudo chmod -R 755 /var/www/html/
+        sudo chown -R www-data:www-data /var/www/html/
 
-    # - name: Run test suite
-    #   run: composer run-script test
+    - name: Verify PHP & MySQLi Extension
+      run: php -m | grep mysqli
+
+    - name: Wait for MySQL to be Ready
+      run: |
+        sudo apt-get install -y mysql-client
+        until mysqladmin ping -h"127.0.0.1" --silent; do
+          echo "Waiting for MySQL..."
+          sleep 2
+        done
+
+    - name: Run Database Migrations (If Needed)
+      run: |
+        mysql -h 127.0.0.1 -u root -proot testdb < database/migrations.sql
+
+    - name: Run PHP Tests (If Any)
+      run: php tests/run_tests.php
